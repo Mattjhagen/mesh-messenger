@@ -117,7 +117,9 @@ const config: ExpoConfig = {
         android: {
           buildArchs: ["armeabi-v7a", "arm64-v8a"],
           minSdkVersion: 24,
-          compileSdkVersion: 34,
+          // Expo dependencies (media3/core 1.17+) now require compile SDK 36.
+          // Keep targetSdk at 34 to avoid changing runtime behavior in this patch.
+          compileSdkVersion: 36,
           targetSdkVersion: 34,
         },
       },
