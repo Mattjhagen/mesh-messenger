@@ -1,21 +1,25 @@
-import { ScrollView, Text, View, Pressable, FlatList, TextInput, KeyboardAvoidingView } from "react-native";
+import { Text, View, Pressable, FlatList, TextInput, KeyboardAvoidingView, Platform } from "react-native";
 import { useMesh } from "@/lib/mesh-context";
 import { ScreenContainer } from "@/components/screen-container";
 import { useColors } from "@/hooks/use-colors";
 import { useCallback, useState, useMemo } from "react";
 import { router, useLocalSearchParams } from "expo-router";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
-import { Platform } from "react-native";
 
 export default function ChatScreen() {
   const colors = useColors();
   const { id } = useLocalSearchParams();
-  const { conversations, sendMessage } = useMesh();
+  const { conversations, sendMessage, userId } = useMesh();
   const [messageText, setMessageText] = useState("");
 
   const conversation = useMemo(() => {
     return conversations.get(id as string);
   }, [conversations, id]);
+
+  const orderedMessages = useMemo(() => {
+    if (!conversation) return [];
+    return [...conversation.messages].reverse();
+  }, [conversation]);
 
   const handleSendMessage = useCallback(async () => {
     if (!messageText.trim() || !id) return;
@@ -30,7 +34,7 @@ export default function ChatScreen() {
 
   const renderMessage = useCallback(
     ({ item }: { item: any }) => {
-      const isOwn = item.senderId === conversations.get(id as string)?.userId;
+      const isOwn = item.senderId === userId;
       return (
         <View
           className={`flex-row ${isOwn ? "justify-end" : "justify-start"} px-4 py-2`}
@@ -61,7 +65,7 @@ export default function ChatScreen() {
         </View>
       );
     },
-    [colors, id, conversations]
+    [colors, userId]
   );
 
   if (!conversation) {
@@ -101,7 +105,7 @@ export default function ChatScreen() {
           </View>
         ) : (
           <FlatList
-            data={conversation.messages}
+            data={orderedMessages}
             renderItem={renderMessage}
             keyExtractor={(item) => item.id}
             inverted

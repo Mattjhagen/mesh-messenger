@@ -4,7 +4,7 @@
  */
 
 import * as nacl from "tweetnacl";
-import { encode as encodeBase64, decode as decodeBase64 } from "js-base64";
+import { fromUint8Array, toUint8Array } from "js-base64";
 
 export interface KeyPair {
   publicKey: string;
@@ -26,8 +26,8 @@ export function generateKeyPair(): KeyPair {
     const keyPair = nacl.box.keyPair();
 
     return {
-      publicKey: encodeBase64(Buffer.from(keyPair.publicKey).toString("binary")),
-      privateKey: encodeBase64(Buffer.from(keyPair.secretKey).toString("binary")),
+      publicKey: fromUint8Array(keyPair.publicKey),
+      privateKey: fromUint8Array(keyPair.secretKey),
     };
   } catch (error) {
     console.error("Failed to generate key pair:", error);
@@ -46,12 +46,7 @@ export function getUserIdFromPublicKey(publicKey: string): string {
  * Convert base64 string to Uint8Array
  */
 function base64ToUint8Array(b64: string): Uint8Array {
-  const binaryString = decodeBase64(b64);
-  const bytes = new Uint8Array(binaryString.length);
-  for (let i = 0; i < binaryString.length; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
-  }
-  return bytes;
+  return toUint8Array(b64);
 }
 
 /**
@@ -82,8 +77,8 @@ export function encryptMessage(
     }
 
     return {
-      ciphertext: encodeBase64(Buffer.from(ciphertext).toString("binary")),
-      nonce: encodeBase64(Buffer.from(nonce).toString("binary")),
+      ciphertext: fromUint8Array(ciphertext),
+      nonce: fromUint8Array(nonce),
     };
   } catch (error) {
     console.error("Encryption failed:", error);
@@ -132,7 +127,7 @@ export function decryptMessage(
 export function hashValue(value: string): string {
   const bytes = new TextEncoder().encode(value);
   const hash = nacl.hash(bytes);
-  return encodeBase64(Buffer.from(hash).toString("binary"));
+  return fromUint8Array(hash);
 }
 
 /**
@@ -140,5 +135,5 @@ export function hashValue(value: string): string {
  */
 export function generateNonce(): string {
   const nonce = nacl.randomBytes(nacl.box.nonceLength);
-  return encodeBase64(Buffer.from(nonce).toString("binary"));
+  return fromUint8Array(nonce);
 }

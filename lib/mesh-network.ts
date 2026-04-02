@@ -4,6 +4,7 @@
  */
 
 import { generateNonce } from "./crypto";
+import { encode as encodeBase64, decode as decodeBase64 } from "js-base64";
 
 export interface MeshNode {
   id: string;
@@ -45,6 +46,13 @@ export class MeshNetwork {
   constructor(nodeId: string, publicKey: string, displayName: string) {
     this.localNodeId = nodeId;
     this.localPublicKey = publicKey;
+    this.localDisplayName = displayName;
+  }
+
+  /**
+   * Update local display name used in beacons.
+   */
+  public setLocalDisplayName(displayName: string): void {
     this.localDisplayName = displayName;
   }
 
@@ -219,7 +227,7 @@ export function createBeacon(
 ): string {
   // Format: nodeId|publicKey|displayName|timestamp
   const beacon = `${nodeId}|${publicKey}|${displayName}|${Date.now()}`;
-  return Buffer.from(beacon).toString("base64");
+  return encodeBase64(beacon);
 }
 
 /**
@@ -232,13 +240,23 @@ export function parseBeacon(beacon: string): {
   timestamp: number;
 } | null {
   try {
-    const decoded = Buffer.from(beacon, "base64").toString("utf-8");
+    const decoded = decodeBase64(beacon);
     const [nodeId, publicKey, displayName, timestamp] = decoded.split("|");
+
+    if (!nodeId || !publicKey || !displayName || !timestamp) {
+      return null;
+    }
+
+    const parsedTimestamp = parseInt(timestamp, 10);
+    if (!Number.isFinite(parsedTimestamp)) {
+      return null;
+    }
+
     return {
       nodeId,
       publicKey,
       displayName,
-      timestamp: parseInt(timestamp),
+      timestamp: parsedTimestamp,
     };
   } catch {
     return null;

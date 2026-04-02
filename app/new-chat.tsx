@@ -1,10 +1,11 @@
-import { ScrollView, Text, View, Pressable, FlatList, TextInput } from "react-native";
+import { Text, View, Pressable, FlatList, TextInput } from "react-native";
 import { useMesh } from "@/lib/mesh-context";
 import { ScreenContainer } from "@/components/screen-container";
 import { useColors } from "@/hooks/use-colors";
 import { useCallback, useState } from "react";
 import { router } from "expo-router";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
+import type { MeshNode } from "@/lib/mesh-network";
 
 export default function NewChatScreen() {
   const colors = useColors();
@@ -26,7 +27,7 @@ export default function NewChatScreen() {
   );
 
   const renderUser = useCallback(
-    ({ item }: { item: any }) => (
+    ({ item }: { item: MeshNode }) => (
       <Pressable
         onPress={() => handleUserPress(item.id, item.displayName, item.publicKey)}
         style={({ pressed }) => [

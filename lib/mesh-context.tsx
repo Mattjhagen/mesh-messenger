@@ -5,7 +5,7 @@
 import React, { createContext, useContext, useReducer, useCallback, useEffect } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { generateKeyPair, getUserIdFromPublicKey, encryptMessage, decryptMessage } from "./crypto";
-import { MeshNetwork, MeshNode, MeshMessage, createBeacon } from "./mesh-network";
+import { MeshNetwork, MeshNode, MeshMessage } from "./mesh-network";
 
 export interface Conversation {
   id: string;
@@ -57,7 +57,14 @@ type MeshAction =
   | { type: "UPDATE_NEARBY_USERS"; payload: MeshNode[] }
   | { type: "ADD_CONVERSATION"; payload: Conversation }
   | { type: "ADD_MESSAGE"; payload: { conversationId: string; message: MeshMessage } }
-  | { type: "UPDATE_MESSAGE_STATUS"; payload: { conversationId: string; messageId: string; status: string } };
+  | {
+      type: "UPDATE_MESSAGE_STATUS";
+      payload: {
+        conversationId: string;
+        messageId: string;
+        status: MeshMessage["deliveryStatus"];
+      };
+    };
 
 function meshReducer(state: MeshState, action: MeshAction): MeshState {
   switch (action.type) {
@@ -90,7 +97,17 @@ function meshReducer(state: MeshState, action: MeshAction): MeshState {
 
     case "ADD_CONVERSATION": {
       const newConversations = new Map(state.conversations);
-      newConversations.set(action.payload.id, action.payload);
+      const existing = newConversations.get(action.payload.id);
+      if (existing) {
+        newConversations.set(action.payload.id, {
+          ...existing,
+          userName: action.payload.userName,
+          publicKey: action.payload.publicKey,
+          signalStrength: action.payload.signalStrength,
+        });
+      } else {
+        newConversations.set(action.payload.id, action.payload);
+      }
       return {
         ...state,
         conversations: newConversations,
@@ -101,11 +118,14 @@ function meshReducer(state: MeshState, action: MeshAction): MeshState {
       const newConversations = new Map(state.conversations);
       const conversation = newConversations.get(action.payload.conversationId);
       if (conversation) {
-        conversation.messages.push(action.payload.message);
-        conversation.lastMessage = action.payload.message;
-        if (action.payload.message.senderId !== state.userId) {
-          conversation.unreadCount++;
-        }
+        const unreadDelta = action.payload.message.senderId !== state.userId ? 1 : 0;
+        const updatedConversation: Conversation = {
+          ...conversation,
+          messages: [...conversation.messages, action.payload.message],
+          lastMessage: action.payload.message,
+          unreadCount: conversation.unreadCount + unreadDelta,
+        };
+        newConversations.set(action.payload.conversationId, updatedConversation);
       }
       return {
         ...state,
@@ -117,10 +137,22 @@ function meshReducer(state: MeshState, action: MeshAction): MeshState {
       const newConversations = new Map(state.conversations);
       const conversation = newConversations.get(action.payload.conversationId);
       if (conversation) {
-        const message = conversation.messages.find((m) => m.id === action.payload.messageId);
-        if (message) {
-          message.deliveryStatus = action.payload.status as any;
-        }
+        const updatedMessages = conversation.messages.map((message) =>
+          message.id === action.payload.messageId
+            ? { ...message, deliveryStatus: action.payload.status }
+            : message
+        );
+        newConversations.set(action.payload.conversationId, {
+          ...conversation,
+          messages: updatedMessages,
+          lastMessage:
+            conversation.lastMessage?.id === action.payload.messageId
+              ? {
+                  ...conversation.lastMessage,
+                  deliveryStatus: action.payload.status,
+                }
+              : conversation.lastMessage,
+        });
       }
       return {
         ...state,
@@ -153,45 +185,36 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
         // Try to load existing keys
         const savedPublicKey = await AsyncStorage.getItem("userPublicKey");
         const savedPrivateKey = await AsyncStorage.getItem("userPrivateKey");
-        const savedDisplayName = await AsyncStorage.getItem("displayName") || "User";
+        const savedDisplayName = await AsyncStorage.getItem("displayName");
 
-        if (savedPublicKey && savedPrivateKey) {
-          const userId = getUserIdFromPublicKey(savedPublicKey);
-          dispatch({
-            type: "INIT",
-            payload: {
-              userId,
-              publicKey: savedPublicKey,
-              privateKey: savedPrivateKey,
-              displayName: savedDisplayName,
-            },
-          });
-        } else {
+        let publicKey = savedPublicKey;
+        let privateKey = savedPrivateKey;
+        const displayName = savedDisplayName?.trim() ? savedDisplayName : "User";
+
+        if (!publicKey || !privateKey) {
           // Generate new keys
           const keyPair = generateKeyPair();
-          const userId = getUserIdFromPublicKey(keyPair.publicKey);
+          publicKey = keyPair.publicKey;
+          privateKey = keyPair.privateKey;
 
-          await AsyncStorage.setItem("userPublicKey", keyPair.publicKey);
-          await AsyncStorage.setItem("userPrivateKey", keyPair.privateKey);
-          await AsyncStorage.setItem("displayName", "User");
-
-          dispatch({
-            type: "INIT",
-            payload: {
-              userId,
-              publicKey: keyPair.publicKey,
-              privateKey: keyPair.privateKey,
-              displayName: "User",
-            },
-          });
+          await AsyncStorage.setItem("userPublicKey", publicKey);
+          await AsyncStorage.setItem("userPrivateKey", privateKey);
+          await AsyncStorage.setItem("displayName", displayName);
         }
 
+        const userId = getUserIdFromPublicKey(publicKey);
+        dispatch({
+          type: "INIT",
+          payload: {
+            userId,
+            publicKey,
+            privateKey,
+            displayName,
+          },
+        });
+
         // Initialize mesh network
-        const userId = getUserIdFromPublicKey(
-          savedPublicKey || (await AsyncStorage.getItem("userPublicKey")) || ""
-        );
-        const displayName = savedDisplayName || "User";
-        const meshNetwork = new MeshNetwork(userId, savedPublicKey || "", displayName);
+        const meshNetwork = new MeshNetwork(userId, publicKey, displayName);
         dispatch({ type: "SET_MESH_NETWORK", payload: meshNetwork });
       } catch (error) {
         console.error("Failed to initialize user:", error);
@@ -203,10 +226,14 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
 
   const setDisplayName = useCallback(
     async (name: string) => {
-      await AsyncStorage.setItem("displayName", name);
-      dispatch({ type: "SET_DISPLAY_NAME", payload: name });
+      const trimmedName = name.trim();
+      if (!trimmedName) return;
+
+      await AsyncStorage.setItem("displayName", trimmedName);
+      state.meshNetwork?.setLocalDisplayName(trimmedName);
+      dispatch({ type: "SET_DISPLAY_NAME", payload: trimmedName });
     },
-    []
+    [state.meshNetwork]
   );
 
   const startConversation = useCallback(
@@ -234,17 +261,23 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
         // Encrypt message
         const encrypted = encryptMessage(content, conversation.publicKey, state.userPrivateKey);
 
-        // Create message
-        const message = state.meshNetwork.prepareMessage(
+        // Create encrypted message payload for network transport.
+        const outboundMessage = state.meshNetwork.prepareMessage(
           conversationId,
           encrypted.ciphertext,
           encrypted.nonce
         );
 
+        // Keep local UI plaintext while network payload stays encrypted.
+        const localMessage: MeshMessage = {
+          ...outboundMessage,
+          content,
+        };
+
         // Add to local conversation
         dispatch({
           type: "ADD_MESSAGE",
-          payload: { conversationId, message },
+          payload: { conversationId, message: localMessage },
         });
 
         // In a real implementation, this would trigger Bluetooth transmission
@@ -252,20 +285,43 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
         setTimeout(() => {
           dispatch({
             type: "UPDATE_MESSAGE_STATUS",
-            payload: { conversationId, messageId: message.id, status: "delivered" },
+            payload: { conversationId, messageId: localMessage.id, status: "delivered" },
           });
         }, 1000);
       } catch (error) {
         console.error("Failed to send message:", error);
       }
     },
-    [state]
+    [state.conversations, state.meshNetwork, state.userPrivateKey]
   );
 
   const receiveMessage = useCallback(
     (message: MeshMessage) => {
       const conversation = state.conversations.get(message.senderId);
-      if (!conversation) return;
+      const senderNode = state.nearbyUsers.find((user) => user.id === message.senderId);
+      const senderPublicKey = conversation?.publicKey || senderNode?.publicKey;
+
+      if (!senderPublicKey) {
+        console.error("Cannot decrypt message: sender public key not found", {
+          senderId: message.senderId,
+        });
+        return;
+      }
+
+      if (!conversation) {
+        dispatch({
+          type: "ADD_CONVERSATION",
+          payload: {
+            id: message.senderId,
+            userId: message.senderId,
+            userName: senderNode?.displayName || `User ${message.senderId}`,
+            publicKey: senderPublicKey,
+            messages: [],
+            unreadCount: 0,
+            signalStrength: senderNode?.signalStrength ?? -100,
+          },
+        });
+      }
 
       try {
         // Decrypt message
@@ -274,7 +330,7 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
             ciphertext: message.content,
             nonce: message.nonce,
           },
-          conversation.publicKey,
+          senderPublicKey,
           state.userPrivateKey
         );
 
@@ -289,12 +345,19 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
         console.error("Failed to decrypt message:", error);
       }
     },
-    [state]
+    [state.conversations, state.nearbyUsers, state.userPrivateKey]
   );
 
-  const updateNearbyUsers = useCallback((users: MeshNode[]) => {
-    dispatch({ type: "UPDATE_NEARBY_USERS", payload: users });
-  }, []);
+  const updateNearbyUsers = useCallback(
+    (users: MeshNode[]) => {
+      if (state.meshNetwork) {
+        users.forEach((user) => state.meshNetwork?.addNode(user));
+        state.meshNetwork.cleanupStaleNodes();
+      }
+      dispatch({ type: "UPDATE_NEARBY_USERS", payload: users });
+    },
+    [state.meshNetwork]
+  );
 
   const value: MeshContextType = {
     userId: state.userId,

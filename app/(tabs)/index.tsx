@@ -1,24 +1,23 @@
-import { ScrollView, Text, View, Pressable, FlatList } from "react-native";
+import { Text, View, Pressable, FlatList } from "react-native";
 import { useMesh } from "@/lib/mesh-context";
 import { ScreenContainer } from "@/components/screen-container";
 import { useColors } from "@/hooks/use-colors";
 import { useCallback } from "react";
 import { router } from "expo-router";
-import { useRouter } from "expo-router";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 
 export default function HomeScreen() {
   const colors = useColors();
-  const { conversations, displayName, userId } = useMesh();
+  const { conversations, userId } = useMesh();
   const conversationList = Array.from(conversations.values());
 
   const handleNewChat = useCallback(() => {
     router.push("/new-chat");
-  }, [router]);
+  }, []);
 
   const handleConversationPress = useCallback((conversationId: string) => {
     router.push(`/chat/${conversationId}`);
-  }, [router]);
+  }, []);
 
   const renderConversation = useCallback(
     ({ item }: { item: any }) => (
